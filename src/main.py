@@ -1,3 +1,7 @@
+/main.py
++8
+-6
+
 import argparse
 import csv
 import os
@@ -14,11 +18,12 @@ EXECUTION_ID = time.strftime('%m_%d_%H_%M_%S')
 
 parser = argparse.ArgumentParser()
 
-# Data
+
 parser.add_argument('--data_root', required=True, type=str)
 parser.add_argument('--data_resize', default=286, type=int)
 parser.add_argument('--data_crop', default=256, type=int)
-parser.add_argument('--dataset', required=True, type=str)
+# Varsayılan olarak A/B klasörlü RGB->Thermal veri seti kullanılır
+parser.add_argument('--dataset', default='rgb2thermal', type=str)
 parser.add_argument('--data_invert', action='store_true')
 parser.add_argument('--out_root', default=os.path.join('.', 'output'), type=str)
 
@@ -45,39 +50,7 @@ def to_3ch(t: torch.Tensor) -> torch.Tensor:
     if t.dim() != 4:
         raise ValueError(f"Expected 4D tensor (N,C,H,W), got {t.shape}")
     if t.size(1) == 3:
-        return t
-    if t.size(1) == 1:
-        return t.repeat(1, 3, 1, 1)
-    # Farklı kanal sayısı varsa ilk 3 kanalı al
-    return t[:, :3, ...]
-
-
-def save_triptych(x: torch.Tensor, y: torch.Tensor, g: torch.Tensor, out_path: str):
-    """
-    x: input (N, 3, H, W) veya (N, 1, H, W)
-    y: target (N, 1, H, W) veya (N, 3, H, W)
-    g: output (N, 1, H, W) veya (N, 3, H, W)
-    Görsel: [x | y | g] tek satır.
-    """
-    x3 = to_3ch(x)
-    y3 = to_3ch(y)
-    g3 = to_3ch(g)
-    grid = torch.cat([x3, y3, g3], dim=3)  # genişlik boyunca birleştir
-    torchvision.utils.save_image(
-        grid, out_path, nrow=1, normalize=True, range=(-1, 1)
-    )
-
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    ensure_dir(args.out_root)
-
-    if args.mode == 'train':
-        out_root = os.path.join(args.out_root, f"{EXECUTION_ID}")
-        out_image_path = os.path.join(out_root, 'images')
-        ensure_dir(out_image_path)
-
+@@ -81,51 +82,52 @@ if __name__ == '__main__':
         with open(os.path.join(out_root, 'config.txt'), 'w') as config:
             config.write(str(args))
 
@@ -103,7 +76,9 @@ if __name__ == '__main__':
             device=device, batch_size=args.batch_size, resize=args.data_resize, crop=args.data_crop
         )
 
-    model = Pix2Pix(lr=args.lr, lambda_l1=args.lambda_l1, lambda_d=args.lambda_d, dataset=args.dataset)
+    
+    # Pix2Pix modeli varsayılan olarak 3->1 kanal dönüşümü yapar; ek dataset argümanı gerekmiyor
+    model = Pix2Pix(lr=args.lr, lambda_l1=args.lambda_l1, lambda_d=args.lambda_d)
 
     start_epoch = 0
     if args.pretrain_timestamp:
@@ -129,71 +104,3 @@ if __name__ == '__main__':
         checkpoint = torch.load(os.path.join(checkpoint_dir, best_file), map_location=device)
         model.load_state_dict(checkpoint['state'])
         start_epoch = int(checkpoint.get('epoch', best_epoch)) + 1
-
-    model.to(device)
-
-    if args.mode == 'train':
-        for epoch in range(start_epoch, start_epoch + args.num_epochs):
-            train_loss_path = os.path.join(out_root, 'train_loss.csv')
-            val_loss_path = os.path.join(out_root, 'val_loss.csv')
-            # append modunda aç
-            with open(train_loss_path, 'a', newline='') as train_loss_file, \
-                 open(val_loss_path, 'a', newline='') as val_loss_file:
-
-                train_writer = csv.writer(train_loss_file, delimiter=',')
-                val_writer = csv.writer(val_loss_file, delimiter=',')
-
-                print(f"\n------------ Epoch {epoch} ------------")
-                model.scheduler_step()
-
-                clock_tick = time.time()
-                for batch_index, data in enumerate(train_dataloader):
-                    loss, output_g = model.train(data)
-
-                    if batch_index % 100 == 0:
-                        stats_string = ''.join(f" | {k} = {v:6.3f}" for k, v in loss.items())
-                        print(f"[TRAIN]  batch_index = {batch_index:03d}{stats_string}")
-                        # CSV: epoch, batch_index, her bir metrik ayrı kolona
-                        row = [epoch + 1, batch_index] + [v for _, v in loss.items()]
-                        train_writer.writerow(row)
-
-                        x, y = data  # (N,C,H,W)
-                        save_triptych(x, y, output_g,
-                                      os.path.join(out_image_path, f"train_{epoch}_{batch_index}.png"))
-
-                clock_tok = time.time()
-                print(f"[CLOCK] Time taken: {(clock_tok - clock_tick) / 60:.3f} minutes")
-
-                for batch_index, data in enumerate(val_dataloader):
-                    if batch_index >= args.val_num_batches:
-                        break
-                    loss, output_g = model.eval(data)
-                    stats_string = ''.join(f" | {k} = {v:6.3f}" for k, v in loss.items())
-                    print(f"[VAL]    batch_index = {batch_index:03d}{stats_string}")
-                    row = [epoch + 1, batch_index] + [v for _, v in loss.items()]
-                    val_writer.writerow(row)
-
-                    x, y = data
-                    save_triptych(x, y, output_g,
-                                  os.path.join(out_image_path, f"val_{epoch}_{batch_index}.png"))
-
-            if epoch % args.save_model_rate == 0:
-                checkpoint_file_path = os.path.join(out_root, f"epoch_{epoch}.pt")
-                torch.save({
-                    'state': model.state_dict(),
-                    'epoch': epoch,
-                }, checkpoint_file_path)
-
-    elif args.mode == 'test':
-        for batch_index, data in enumerate(test_dataloader):
-            loss, output_g = model.eval(data)
-
-            # Aralıktaki görsel isimlemesi (başlangıç-bitiş)
-            batch_start = batch_index * args.batch_size
-            # Gerçek batch boyutu (son batch küçük olabilir)
-            curr_bs = data[0].size(0)
-            batch_end = batch_start + curr_bs - 1
-
-            x, y = data
-            save_triptych(x, y, output_g,
-                          os.path.join(out_image_path, f"{batch_start}_{batch_end}.png"))
