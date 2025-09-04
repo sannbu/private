@@ -201,15 +201,11 @@ class ABFoldersDataset(Dataset):
 # =========================
 #  Dataloader fabrikası
 # =========================
-def dataloader(root, dataset, invert=False, device=None, train=True, resize=None, crop=None,
-               batch_size=1, shuffle=False, num_workers=4):
-    """
-    root:
-      - rgb2thermal için:  <data_split> klasörü (içinde A/ ve B/ olmalı)
-      - diğerleri için:   doğrudan görüntü dosyalarının olduğu klasör
-    """
+def dataloader(root, dataset='rgb2thermal', invert=False, device=None, train=True,
+               resize=None, crop=None, batch_size=1, shuffle=False, num_workers=4):
+    """Veri kümesinden DataLoader oluştur."""
 
-    ds_name = (dataset or "").lower()
+    ds_name = (dataset or 'rgb2thermal').lower()
 
     if ds_name in ("rgb2thermal", "rgb-thermal", "rgbt"):
         ds = ABFoldersDataset(root=root, train=train, invert=invert,

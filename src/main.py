@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--data_root', required=True, type=str)
 parser.add_argument('--data_resize', default=286, type=int)
 parser.add_argument('--data_crop', default=256, type=int)
-parser.add_argument('--dataset', required=True, type=str)
+# A/B klasörlü RGB->Thermal veri seti varsayılır
 parser.add_argument('--data_invert', action='store_true')
 parser.add_argument('--out_root', default=os.path.join('.', 'output'), type=str)
 
@@ -82,14 +82,16 @@ if __name__ == '__main__':
             config.write(str(args))
 
         train_dataloader = dataloader(
-            os.path.join(args.data_root, 'train'), args.dataset,
+            os.path.join(args.data_root, 'train'),
             invert=args.data_invert, train=True, shuffle=True,
-            device=device, batch_size=args.batch_size, resize=args.data_resize, crop=args.data_crop
+            device=device, batch_size=args.batch_size,
+            resize=args.data_resize, crop=args.data_crop,
         )
         val_dataloader = dataloader(
-            os.path.join(args.data_root, 'val'), args.dataset,
+            os.path.join(args.data_root, 'val'),
             invert=args.data_invert, train=False, shuffle=False,
-            device=device, batch_size=args.batch_size, resize=args.data_resize, crop=args.data_crop
+            device=device, batch_size=args.batch_size,
+            resize=args.data_resize, crop=args.data_crop,
         )
 
     elif args.mode == 'test':
@@ -98,12 +100,14 @@ if __name__ == '__main__':
         ensure_dir(out_image_path)
 
         test_dataloader = dataloader(
-            os.path.join(args.data_root, 'test'), args.dataset,
+            os.path.join(args.data_root, 'test'),
             invert=args.data_invert, train=False, shuffle=False,
-            device=device, batch_size=args.batch_size, resize=args.data_resize, crop=args.data_crop
+            device=device, batch_size=args.batch_size,
+            resize=args.data_resize, crop=args.data_crop,
         )
 
-    model = Pix2Pix(lr=args.lr, lambda_l1=args.lambda_l1, lambda_d=args.lambda_d, dataset=args.dataset)
+    # Pix2Pix modeli varsayılan olarak 3->1 kanal dönüşümü yapar; ek dataset argümanı gerekmiyor
+    model = Pix2Pix(lr=args.lr, lambda_l1=args.lambda_l1, lambda_d=args.lambda_d)
 
     start_epoch = 0
     if args.pretrain_timestamp:
